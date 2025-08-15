@@ -1,4 +1,5 @@
 import numpy as np
+import json
 import os
 import string
 import torch
@@ -193,6 +194,13 @@ if __name__ == "__main__":
 
     print("=== Training Model A (First Half) ===")
     vocab_A, word_to_idx_A, pairs_A = prepare_data(text_A, 'A', CONTEXT_WINDOW_SIZE, VOCAB_SIZE)
+    vocab_save_path = "word_to_idx_A.json"
+
+    with open(vocab_save_path, 'w') as f:
+        json.dump(word_to_idx_A, f)
+
+    print(f"Vocabulary map for Model A saved to {vocab_save_path}")
+
     embeddings_A, loss_history_A = train_model(vocab_A, pairs_A, EMBEDDING_DIM, EPOCHS, LEARNING_RATE, BATCH_SIZE, INIT_STD, 'A')
     
     print("\n=== Training Model B (Second Half) ===")
