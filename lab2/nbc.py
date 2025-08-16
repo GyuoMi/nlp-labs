@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
+import random
 
 # --- Main config ---
 BOOK_DIR = "harry_potter"
@@ -21,6 +22,8 @@ NUM_CLASSES = 7
 EPOCHS = 100
 LEARNING_RATE = 0.001
 BATCH_SIZE = 64
+DROPOUT_PROB = 0.5
+WEIGHT_DECAY = 1e-4
 
 # --- GPU Device Setup ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -83,7 +86,7 @@ def embed_pages(pages, embedding_matrix, word_to_idx, page_size, embedding_dim):
 class CNNClassifier(nn.Module):
     # https://www.geeksforgeeks.org/nlp/text-classification-using-cnn/
     # https://towardsdatascience.com/text-classification-with-cnns-in-pytorch-1113df31e79f/
-    def __init__(self, embedding_dim, num_filters, kernel_size, num_classes):
+    def __init__(self, embedding_dim, num_filters, kernel_size, num_classes, dropout_prob):
         super(CNNClassifier, self).__init__()
         # The convolutional layer expects input of shape (batch_size, in_channels, sequence_length)
         # We have to reshape our embedded pages to match this.
@@ -92,6 +95,7 @@ class CNNClassifier(nn.Module):
         self.relu = nn.ReLU()
         # Max-pooling will take the maximum value from the output of the conv layer
         self.pool = nn.AdaptiveMaxPool1d(1)
+        self.dropout = nn.Dropout(p=dropout_prob)
         self.fc = nn.Linear(num_filters, num_classes)
 
     def forward(self, x):
@@ -104,9 +108,42 @@ class CNNClassifier(nn.Module):
         
         x = self.pool(x) # -> (batch_size, num_filters, 1)
         x = x.squeeze(2) # -> (batch_size, num_filters)
+        x = self.dropout(x)
         
         x = self.fc(x) # -> (batch_size, num_classes)
         return x
+
+def predict_random_page(model, val_data, val_labels):
+    """
+    Selects a random page from the validation set and displays the model's prediction.
+    """
+    model.eval() # Ensure the model is in evaluation mode
+    
+    # Select a random index from the validation set
+    random_idx = random.randint(0, len(val_data) - 1)
+    sample_page = val_data[random_idx]
+    true_label_idx = val_labels[random_idx].item()
+
+    # The model expects a batch, so we add a batch dimension of 1
+    sample_page_batch = sample_page.unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        output = model(sample_page_batch)
+        _, predicted_idx = torch.max(output.data, 1)
+        predicted_idx = predicted_idx.item()
+
+    # Convert indices back to human-readable book numbers
+    true_book = f"Book {true_label_idx + 1}"
+    predicted_book = f"Book {predicted_idx + 1}"
+
+    print("\n--- Single Page Prediction ---")
+    print(f"Selected a random page from the validation set (Index: {random_idx}).")
+    print(f"The page is actually from: {true_book}")
+    print(f"The model predicted: {predicted_book}")
+    if true_book == predicted_book:
+        print("Result: Correct ✅")
+    else:
+        print("Result: Incorrect ❌")
 
 if __name__ == "__main__":
     pages, labels = prepare_dataset(BOOK_DIR, PAGE_SIZE)
@@ -146,9 +183,9 @@ if __name__ == "__main__":
 
             # --- Initialize and Train the CNN Model ---
             print("\n--- Training Base CNN Classifier ---")
-            model = CNNClassifier(EMBEDDING_DIM, NUM_FILTERS, KERNEL_SIZE, NUM_CLASSES).to(device)
+            model = CNNClassifier(EMBEDDING_DIM, NUM_FILTERS, KERNEL_SIZE, NUM_CLASSES, DROPOUT_PROB).to(device)
             criterion = nn.CrossEntropyLoss()
-            optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+            optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
             for epoch in range(EPOCHS):
                 model.train()
@@ -177,6 +214,7 @@ if __name__ == "__main__":
                 
                 accuracy = 100 * correct / total
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Loss: {total_loss/len(train_loader):.4f}, Validation Accuracy: {accuracy:.2f}%")
+            predict_random_page(model, X_val_tensor, y_val_tensor)
 
         except FileNotFoundError:
             print(f"\nError: Could not find Lab 1 model ('{LAB1_MODEL_PATH}') or vocabulary ('{LAB1_VOCAB_PATH}').")
